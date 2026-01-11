@@ -111,6 +111,10 @@ import { createPendingPaymentForUser } from '../utils/payment.utils';
 //   }
 // };
 
+export interface AuthRequest extends Request {
+  user?: any;
+}
+
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password, role, flatId, ownerName, ownerEmail, monthlyMaintenance } = req.body;
