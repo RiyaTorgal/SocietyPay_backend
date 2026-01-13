@@ -2,6 +2,7 @@ import { Response } from "express";
 import prisma from "../config/databases";
 import { AuthRequest } from "../middleware/auth.middleware";
 import { v4 as uuid } from "uuid";
+import { generateReceiptPDF } from "../services/pdfService";
 
 /**
  * UPI Configuration
@@ -22,114 +23,6 @@ export const getUPIConfig = async (req: AuthRequest, res: Response) => {
     receiverName: UPI_CONFIG.receiverName,
   });
 };
-
-/**
- * Initiate payment (creates or updates PENDING payment)
- */
-// export const initiatePayment = async (req: AuthRequest, res: Response) => {
-//   try {
-//     const { maintenanceMonthId } = req.body;
-
-//     if (!maintenanceMonthId) {
-//       return res
-//         .status(400)
-//         .json({ message: "maintenanceMonthId is required" });
-//     }
-
-//     // Ensure maintenance month exists (IMPORTANT)
-//     const maintenanceMonth =
-//       await prisma.maintenanceMonth.findUnique({
-//         where: { id: maintenanceMonthId },
-//       });
-
-//     if (!maintenanceMonth) {
-//       return res.status(404).json({
-//         message:
-//           "Maintenance month not initialized. Please contact admin.",
-//       });
-//     }
-
-//     // Fetch logged-in user and flat
-//     const user = await prisma.user.findUnique({
-//       where: { id: req.user.id },
-//       include: { flat: true },
-//     });
-
-//     if (!user?.flat) {
-//       return res
-//         .status(400)
-//         .json({ message: "No flat assigned" });
-//     }
-
-//     // Check if already PAID
-//     const existingPaidPayment =
-//       await prisma.payment.findFirst({
-//         where: {
-//           flatId: user.flat.id,
-//           maintenanceMonthId,
-//           status: "PAID",
-//         },
-//       });
-
-//     if (existingPaidPayment) {
-//       return res
-//         .status(400)
-//         .json({ message: "Already paid for this month" });
-//     }
-
-//     // Check if PENDING payment exists
-//     const existingPendingPayment =
-//       await prisma.payment.findFirst({
-//         where: {
-//           flatId: user.flat.id,
-//           maintenanceMonthId,
-//           status: "PENDING",
-//         },
-//       });
-
-//     const transactionId = uuid();
-//     let payment;
-
-//     if (existingPendingPayment) {
-//       // Update existing pending payment
-//       payment = await prisma.payment.update({
-//         where: { id: existingPendingPayment.id },
-//         data: {
-//           transactionId,
-//           paymentMode: "UPI" as any, // until Prisma client regen
-//           updatedAt: new Date(),
-//         },
-//       });
-//     } else {
-//       // Create new payment (FK-safe)
-//       payment = await prisma.payment.create({
-//         data: {
-//           amount: user.flat.monthlyMaintenance,
-//           status: "PENDING",
-//           paymentMode: "UPI" as any,
-//           transactionId,
-
-//           flat: {
-//             connect: { id: user.flat.id },
-//           },
-//           maintenanceMonth: {
-//             connect: { id: maintenanceMonth.id },
-//           },
-//         },
-//       });
-//     }
-
-//     res.status(201).json({
-//       payment,
-//       upiConfig: UPI_CONFIG,
-//     });
-//   } catch (error) {
-//     console.error("Initiate payment error:", error);
-//     res.status(500).json({
-//       message: "Failed to initiate payment",
-//     });
-//   }
-// };
 
 export const initiatePayment = async (req: AuthRequest, res: Response) => {
   try {
@@ -275,37 +168,168 @@ export const confirmPayment = async (
   }
 };
 
-// Get all payments (Admin only)
-// export const getAllPayments = async (req: AuthRequest, res: Response) => {
-//   try {
-//     const payments = await prisma.payment.findMany({
-//       include: {
-//         flat: {
-//           include: {
-//             user: {
-//               select: {
-//                 id: true,
-//                 name: true,
-//                 email: true,
-//               }
-//             }
-//           }
-//         },
-//         maintenanceMonth: true,
-//       },
-//       orderBy: [
-//         { maintenanceMonth: { year: 'desc' } },
-//         { maintenanceMonth: { month: 'desc' } },
-//         { flat: { flatNumber: 'asc' } },
-//       ],
-//     });
+/**
+ * Generate receipts for all PAID payments that don't have receipts yet
+ * Can be called by admin or run as a one-time script
+ */
+export const generateMissingReceipts = async (req: AuthRequest, res: Response) => {
+  try {
+    // Find all PAID payments without receipts
+    const paymentsWithoutReceipts = await prisma.payment.findMany({
+      where: {
+        status: "PAID",
+        receipt: null // Payments that don't have a receipt yet
+      },
+      include: {
+        flat: true,
+        maintenanceMonth: true
+      }
+    });
 
-//     res.json(payments);
-//   } catch (error) {
-//     console.error('Get all payments error:', error);
-//     res.status(500).json({ message: 'Failed to fetch payments' });
-//   }
-// };
+    if (paymentsWithoutReceipts.length === 0) {
+      return res.json({
+        message: "All PAID payments already have receipts",
+        count: 0
+      });
+    }
+
+    const generatedReceipts = [];
+
+    // Generate receipt for each payment
+    for (const payment of paymentsWithoutReceipts) {
+      try {
+        const receiptNumber = `RCT-${Date.now()}-${payment.id.slice(0, 8)}`;
+        
+        // Generate PDF
+        const pdfBuffer = generateReceiptPDF({
+          receiptNumber,
+          flatNumber: payment.flat.flatNumber,
+          ownerName: payment.flat.ownerName,
+          month: payment.maintenanceMonth.month,
+          year: payment.maintenanceMonth.year,
+          amount: payment.amount,
+          paymentMode: payment.paymentMode || "UPI",
+          transactionId: payment.transactionId || "N/A",
+          paidAt: payment.paidAt || new Date(),
+        });
+
+        // Create receipt
+        const receipt = await prisma.receipt.create({
+          data: {
+            paymentId: payment.id,
+            receiptNumber,
+            // pdfData: pdfBuffer,
+            emailSent: false,
+          }
+        });
+
+        generatedReceipts.push({
+          paymentId: payment.id,
+          receiptNumber: receipt.receiptNumber,
+          flatNumber: payment.flat.flatNumber,
+        });
+
+        console.log(`✅ Generated receipt ${receipt.receiptNumber} for payment ${payment.id}`);
+      } catch (error) {
+        console.error(`❌ Failed to generate receipt for payment ${payment.id}:`, error);
+      }
+    }
+
+    res.json({
+      message: "Receipts generated successfully",
+      count: generatedReceipts.length,
+      receipts: generatedReceipts
+    });
+
+  } catch (error) {
+    console.error("Generate missing receipts error:", error);
+    res.status(500).json({
+      message: "Failed to generate receipts",
+      error: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+};
+
+/**
+ * Standalone script to generate receipts (can be run directly)
+ * Usage: npx ts-node src/scripts/generateReceipts.ts
+ */
+export async function generateReceiptsScript() {
+  try {
+    console.log("🔍 Finding PAID payments without receipts...");
+
+    const paymentsWithoutReceipts = await prisma.payment.findMany({
+      where: {
+        status: "PAID",
+        receipt: null
+      },
+      include: {
+        flat: true,
+        maintenanceMonth: true
+      }
+    });
+
+    console.log(`📋 Found ${paymentsWithoutReceipts.length} payments without receipts`);
+
+    if (paymentsWithoutReceipts.length === 0) {
+      console.log("✅ All PAID payments already have receipts!");
+      return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const payment of paymentsWithoutReceipts) {
+      try {
+        const receiptNumber = `RCT-${Date.now()}-${payment.id.slice(0, 8)}`;
+        
+        const pdfBuffer = generateReceiptPDF({
+          receiptNumber,
+          flatNumber: payment.flat.flatNumber,
+          ownerName: payment.flat.ownerName,
+          month: payment.maintenanceMonth.month,
+          year: payment.maintenanceMonth.year,
+          amount: payment.amount,
+          paymentMode: payment.paymentMode || "UPI",
+          transactionId: payment.transactionId || "N/A",
+          paidAt: payment.paidAt || new Date(),
+        });
+
+        await prisma.receipt.create({
+          data: {
+            paymentId: payment.id,
+            receiptNumber,
+            // pdfData: pdfBuffer,
+            emailSent: false,
+          }
+        });
+
+        successCount++;
+        console.log(`✅ [${successCount}/${paymentsWithoutReceipts.length}] Generated receipt ${receiptNumber} for Flat ${payment.flat.flatNumber}`);
+
+      } catch (error) {
+        failCount++;
+        console.error(`❌ Failed for payment ${payment.id}:`, error);
+      }
+    }
+
+    console.log("\n📊 Summary:");
+    console.log(`   ✅ Success: ${successCount}`);
+    console.log(`   ❌ Failed: ${failCount}`);
+    console.log(`   📝 Total: ${paymentsWithoutReceipts.length}`);
+
+  } catch (error) {
+    console.error("Script error:", error);
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// If running as standalone script
+if (require.main === module) {
+  generateReceiptsScript();
+}
+
 export const getAllPayments = async (req: AuthRequest, res: Response) => {
   try {
     // First, get all payments with flat and maintenance month data
