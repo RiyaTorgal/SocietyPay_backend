@@ -43,6 +43,7 @@ export const exportPaymentsCSV = async (req: AuthRequest, res: Response): Promis
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         flatId: true,
       },
@@ -66,11 +67,13 @@ export const exportPaymentsCSV = async (req: AuthRequest, res: Response): Promis
       'Time',
       'Name',
       'Email',
+      'Phone',
       'Flat No',
       'Role',
       'Month',
       'Amount',
       'Paid/Unpaid',
+      'Receipt Generated'
     ];
 
     const csvRows = payments.map((payment) => {
@@ -84,18 +87,23 @@ export const exportPaymentsCSV = async (req: AuthRequest, res: Response): Promis
       // Use user data if available, otherwise fall back to flat owner data
       const name = user?.name || payment.flat.ownerName;
       const email = user?.email || payment.flat.ownerEmail;
+      const phone = user?.phone || payment.flat.ownerPhone || 'N/A';
       const role = user?.role || 'N/A';
+      const receiptGenerated = payment.status === 'PAID' ? 'Yes' : 'No';
       
       return [
         date,
         time,
         name,
         email,
+        phone,
         payment.flat.flatNumber,
         role,
         `${monthNames[payment.maintenanceMonth.month - 1]} ${payment.maintenanceMonth.year}`,
         payment.amount.toString(),
         payment.status === 'PAID' ? 'Paid' : 'Unpaid',
+        receiptGenerated
+
       ];
     });
 

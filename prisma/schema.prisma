@@ -12,6 +12,7 @@ model User {
   email     String   @unique
   password  String
   name      String
+  phone     String?  // 🆕 User's phone number
   role      Role     @default(USER)
 
   // 🔑 1–1 relation (User owns the foreign key)
@@ -30,6 +31,7 @@ model Flat {
   flatNumber         String   @unique
   ownerName          String
   ownerEmail         String
+  ownerPhone     String?  // 🆕 User's phone number
   monthlyMaintenance Float
 
   // 🔑 inverse side of 1–1 relation
