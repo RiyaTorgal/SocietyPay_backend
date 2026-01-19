@@ -9,6 +9,31 @@ export interface AuthRequest extends Request {
   user?: any;
 }
 
+export const getAdminContact = async (req: Request, res: Response) => {
+  try {
+    // Fetch the first admin user (or you can have a specific settings table)
+    const admin = await prisma.user.findFirst({
+      where: {
+        role: 'ADMIN'
+      },
+      select: {
+        phone: true,
+        email: true,
+        name: true
+      }
+    });
+
+    if (!admin) {
+      return res.status(404).json({ message: 'Admin contact not found' });
+    }
+
+    res.json(admin);
+  } catch (error) {
+    console.error('Error fetching admin contact:', error);
+    res.status(500).json({ message: 'Failed to fetch admin contact' });
+  }
+};
+
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email,phone, password, role, flatId, ownerName, ownerEmail, ownerPhone, monthlyMaintenance } = req.body;
@@ -192,6 +217,8 @@ export const login = async (req: Request, res: Response) => {
         role: user.role,
         flatId: user.flatId,
         flat: user.flat,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
     });
   } catch (error) {
