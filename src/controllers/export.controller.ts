@@ -65,7 +65,8 @@ export const exportPaymentsCSV = async (req: AuthRequest, res: Response): Promis
     const csvHeaders = [
       'Date',
       'Time',
-      'Name',
+      'Tenant Name',
+      'Owner Name',
       'Email',
       'Phone',
       'Flat No',
@@ -86,6 +87,7 @@ export const exportPaymentsCSV = async (req: AuthRequest, res: Response): Promis
       
       // Use user data if available, otherwise fall back to flat owner data
       const name = user?.name || payment.flat.ownerName;
+      const ownerName = payment.flat.ownerName;
       const email = user?.email || payment.flat.ownerEmail;
       const phone = user?.phone || payment.flat.ownerPhone || 'N/A';
       const role = user?.role || 'N/A';
@@ -95,6 +97,7 @@ export const exportPaymentsCSV = async (req: AuthRequest, res: Response): Promis
         date,
         time,
         name,
+        ownerName,
         email,
         phone,
         payment.flat.flatNumber,

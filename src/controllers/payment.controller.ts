@@ -199,7 +199,15 @@ export const adminConfirmPayment = async (req: AuthRequest, res: Response) => {
 export const getAllPayments = async (req: AuthRequest, res: Response) => {
   try {
     const payments = await prisma.payment.findMany({
-      include: { flat: true, maintenanceMonth: true, receipt: true },
+      include: { 
+        // flat: true,
+        flat: {
+          include: {
+            user: true  // ✅ Add this to include the user/tenant data
+          }
+        },
+        maintenanceMonth: true, 
+        receipt: true },
       orderBy: [
         { maintenanceMonth: { year: "desc" } },
         { maintenanceMonth: { month: "desc" } },
