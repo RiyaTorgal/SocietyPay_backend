@@ -71,6 +71,12 @@ app.get('/', (_req, res) => {
   res.status(200).json({ message: 'API is running 🚀' });
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+  });
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/flats', flatRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
